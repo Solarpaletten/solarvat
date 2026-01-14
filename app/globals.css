@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground: #171717;
+  --background: #ffffff;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Table styles */
+.table-container {
+  @apply overflow-x-auto;
+}
+
+table {
+  @apply w-full text-sm;
+}
+
+th {
+  @apply text-left font-semibold text-gray-700 bg-gray-50 px-4 py-3 border-b;
+}
+
+td {
+  @apply px-4 py-3 border-b border-gray-100;
+}
+
+tr:hover {
+  @apply bg-gray-50;
+}
+
+/* Badge styles */
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+}
+
+.badge-primary {
+  @apply bg-solar-100 text-solar-700;
+}
+
+.badge-success {
+  @apply bg-green-100 text-green-700;
+}
+
+.badge-warning {
+  @apply bg-yellow-100 text-yellow-700;
+}
+
+.badge-neutral {
+  @apply bg-gray-100 text-gray-700;
+}
+
+/* Filter styles */
+.filter-select {
+  @apply block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-solar-500 focus:border-solar-500 text-sm;
+}
+
+.filter-checkbox {
+  @apply h-4 w-4 text-solar-600 focus:ring-solar-500 border-gray-300 rounded;
+}

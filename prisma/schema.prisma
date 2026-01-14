@@ -1,0 +1,669 @@
+// SOLAR Platform — Multi-Tenant Schema
+// Version: 3.0 (Production)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTHENTICATION & AUTHORIZATION
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String?
+  avatarUrl     String?
+  
+  // System role (for SOLAR staff)
+  systemRole    SystemRole @default(USER)
+  
+  // Relations
+  memberships   Membership[]
+  sessions      Session[]
+  createdCases  Case[]       @relation("CaseCreator")
+  assignedSteps CaseStep[]   @relation("StepAssignee")
+  comments      Comment[]
+  documents     Document[]   @relation("DocumentUploader")
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  token        String   @unique
+  expiresAt    DateTime
+  ipAddress    String?
+  userAgent    String?
+  
+  createdAt    DateTime @default(now())
+  
+  @@index([userId])
+  @@index([token])
+}
+
+enum SystemRole {
+  USER           // Regular user (clients)
+  SOLAR_STAFF    // SOLAR employee
+  SOLAR_ADMIN    // SOLAR administrator (full access)
+}
+
+// ============================================
+// MULTI-TENANCY
+// ============================================
+
+model Tenant {
+  id          String   @id @default(cuid())
+  
+  // Identification
+  slug        String   @unique  // URL-friendly identifier
+  name        String            // Display name
+  legalName   String?           // Official company name (after registration)
+  
+  // Contact
+  email       String?
+  phone       String?
+  
+  // Address (after registration)
+  street      String?
+  city        String?
+  postalCode  String?
+  canton      String?
+  country     String   @default("CH")
+  
+  // Business details
+  uid         String?  // UID number (after registration)
+  vatNumber   String?  // VAT number (after VAT registration)
+  
+  // Status
+  status      TenantStatus @default(LEAD)
+  
+  // Relations
+  memberships Membership[]
+  cases       Case[]
+  invoices    Invoice[]
+  documents   Document[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([slug])
+  @@index([status])
+}
+
+enum TenantStatus {
+  LEAD          // Initial contact
+  ACTIVE        // Active client
+  SUSPENDED     // Temporarily suspended
+  CHURNED       // No longer a client
+}
+
+model Membership {
+  id        String         @id @default(cuid())
+  
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  tenantId  String
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  role      TenantRole     @default(MEMBER)
+  
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  
+  @@unique([userId, tenantId])
+  @@index([userId])
+  @@index([tenantId])
+}
+
+enum TenantRole {
+  OWNER    // Full access to tenant
+  ADMIN    // Can manage tenant settings
+  MEMBER   // Can view and interact
+  VIEWER   // Read-only access
+}
+
+// ============================================
+// CASES (Company Registration Process)
+// ============================================
+
+model Case {
+  id          String     @id @default(cuid())
+  
+  // Reference
+  caseNumber  String     @unique  // Human-readable: SOLAR-2024-0001
+  
+  // Tenant
+  tenantId    String
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Case details
+  companyType CompanyType
+  companyName String              // Desired company name
+  purpose     String?             // Business purpose
+  
+  // Location
+  canton      String              // Target canton (ZG, ZH, etc.)
+  city        String?             // Target city
+  
+  // Capital
+  shareCapital Decimal?  @db.Decimal(12, 2)  // CHF
+  
+  // Status
+  status      CaseStatus @default(LEAD)
+  
+  // Creator (SOLAR staff)
+  createdById String
+  createdBy   User       @relation("CaseCreator", fields: [createdById], references: [id])
+  
+  // Relations
+  steps       CaseStep[]
+  providers   CaseProvider[]
+  invoices    Invoice[]
+  documents   Document[]
+  comments    Comment[]
+  
+  // Timestamps
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([caseNumber])
+}
+
+enum CompanyType {
+  GMBH
+  AG
+}
+
+enum CaseStatus {
+  // Pre-registration
+  LEAD                    // Initial inquiry
+  KYC_PENDING             // Awaiting KYC documents
+  KYC_APPROVED            // KYC approved
+  
+  // Provider selection
+  PROVIDERS_SELECTING     // Selecting notary/address/director
+  PROVIDERS_CONFIRMED     // All providers confirmed
+  
+  // Incorporation
+  NOTARY_SCHEDULED        // Notary appointment set
+  DOCUMENTS_SIGNING       // Documents being signed
+  FILED                   // Submitted to Handelsregister
+  
+  // Post-registration
+  REGISTERED              // Company registered (UID received)
+  VAT_APPLYING            // Applying for VAT number
+  VAT_GRANTED             // VAT number received
+  
+  // Operational
+  ACCOUNTING_SETUP        // Setting up accounting
+  ACTIVE                  // Fully operational
+  
+  // Terminal
+  CANCELLED               // Cancelled by client
+  REJECTED                // Rejected (KYC fail, etc.)
+}
+
+model CaseStep {
+  id          String        @id @default(cuid())
+  
+  caseId      String
+  case        Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  // Step definition
+  stepType    StepType
+  order       Int           // Sequence number
+  
+  // Status
+  status      StepStatus    @default(TODO)
+  
+  // Assignment
+  assigneeId  String?
+  assignee    User?         @relation("StepAssignee", fields: [assigneeId], references: [id])
+  
+  // Timing
+  dueDate     DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  
+  // Notes
+  notes       String?
+  blockedReason String?
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  @@unique([caseId, stepType])
+  @@index([caseId])
+  @@index([status])
+}
+
+enum StepType {
+  // KYC
+  KYC_COLLECT
+  KYC_REVIEW
+  KYC_APPROVE
+  
+  // Provider Selection
+  SELECT_NOTARY
+  SELECT_ADDRESS
+  SELECT_DIRECTOR
+  SELECT_ACCOUNTING
+  
+  // Incorporation
+  PREPARE_DOCUMENTS
+  NOTARY_APPOINTMENT
+  SIGN_DOCUMENTS
+  SUBMIT_REGISTRY
+  
+  // Post-registration
+  RECEIVE_UID
+  APPLY_VAT
+  RECEIVE_VAT
+  
+  // Accounting
+  SETUP_ACCOUNTING
+  HANDOVER_ACCOUNTING
+}
+
+enum StepStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  SKIPPED
+}
+
+// ============================================
+// PROVIDERS (from Catalog)
+// ============================================
+
+model Provider {
+  id            String       @id @default(cuid())
+  
+  // Identification
+  slug          String       @unique
+  name          String
+  companyName   String?
+  
+  // Type
+  type          ProviderType
+  
+  // Contact
+  email         String?
+  phone         String?
+  website       String?
+  
+  // Location
+  country       String       @default("CH")
+  
+  // Status
+  isActive      Boolean      @default(true)
+  isPrimary     Boolean      @default(false)  // Our preferred partner
+  
+  // Relations
+  offers        ProviderOffer[]
+  caseProviders CaseProvider[]
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  @@index([type])
+  @@index([isActive])
+}
+
+enum ProviderType {
+  NOTARY
+  ADDRESS
+  DIRECTOR
+  ACCOUNTING
+  QES
+}
+
+model ProviderOffer {
+  id           String      @id @default(cuid())
+  
+  providerId   String
+  provider     Provider    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  
+  // Coverage
+  cantons      String[]    // ["ZG", "ZH", "ALL_SWISS"]
+  cities       String[]    // ["ZUG", "ZURICH"]
+  isNationwide Boolean     @default(false)
+  
+  // Company types supported
+  supportsGmbh Boolean     @default(true)
+  supportsAg   Boolean     @default(true)
+  
+  // Capabilities (type-specific)
+  digitalQes   Boolean?    // Notary: supports QES
+  upregAccess  Boolean?    // Notary: direct Handelsregister access
+  
+  mailForward  Boolean?    // Address: mail forwarding
+  phoneService Boolean?    // Address: phone answering
+  meetingRoom  Boolean?    // Address: meeting room
+  
+  vatServices  Boolean?    // Accounting: VAT handling
+  payroll      Boolean?    // Accounting: payroll
+  audit        Boolean?    // Accounting: audit services
+  intlTrade    Boolean?    // Accounting: international trade
+  
+  // Pricing
+  priceGmbh    Decimal?    @db.Decimal(10, 2)  // One-time or per year
+  priceAg      Decimal?    @db.Decimal(10, 2)
+  priceUnit    PriceUnit   @default(ONE_TIME)
+  
+  // Status
+  isActive     Boolean     @default(true)
+  
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  @@index([providerId])
+}
+
+enum PriceUnit {
+  ONE_TIME
+  PER_YEAR
+  PER_MONTH
+  PER_SIGNATURE
+}
+
+model CaseProvider {
+  id          String       @id @default(cuid())
+  
+  caseId      String
+  case        Case         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  providerId  String
+  provider    Provider     @relation(fields: [providerId], references: [id])
+  
+  // Role in this case
+  role        ProviderType
+  
+  // Agreed pricing
+  agreedPrice Decimal?     @db.Decimal(10, 2)
+  
+  // Status
+  status      CaseProviderStatus @default(PROPOSED)
+  
+  // Notes
+  notes       String?
+  
+  confirmedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  @@unique([caseId, role])  // One provider per role per case
+  @@index([caseId])
+  @@index([providerId])
+}
+
+enum CaseProviderStatus {
+  PROPOSED
+  CONTACTED
+  CONFIRMED
+  DECLINED
+  REPLACED
+}
+
+// ============================================
+// DOCUMENTS
+// ============================================
+
+model Document {
+  id          String       @id @default(cuid())
+  
+  // Ownership
+  tenantId    String?
+  tenant      Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  caseId      String?
+  case        Case?        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  // File info
+  filename    String
+  mimeType    String
+  size        Int          // bytes
+  storageKey  String       // S3/R2 key
+  
+  // Metadata
+  documentType DocumentType
+  description  String?
+  
+  // Uploader
+  uploadedById String
+  uploadedBy   User        @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  
+  // Signature (if applicable)
+  signatureStatus SignatureStatus?
+  signedAt        DateTime?
+  signedBy        String?   // Name of signer
+  
+  // Visibility
+  isInternal  Boolean      @default(false)  // Hidden from client
+  
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  @@index([tenantId])
+  @@index([caseId])
+  @@index([documentType])
+}
+
+enum DocumentType {
+  // KYC
+  PASSPORT
+  ID_CARD
+  PROOF_OF_ADDRESS
+  PROOF_OF_FUNDS
+  
+  // Incorporation
+  ARTICLES_OF_ASSOCIATION
+  SHAREHOLDER_AGREEMENT
+  BOARD_RESOLUTION
+  SIGNATURE_SPECIMEN
+  
+  // Registration
+  HANDELSREGISTER_EXTRACT
+  UID_CERTIFICATE
+  VAT_CERTIFICATE
+  
+  // Accounting
+  INVOICE
+  RECEIPT
+  BANK_STATEMENT
+  TAX_RETURN
+  
+  // Other
+  CONTRACT
+  CORRESPONDENCE
+  OTHER
+}
+
+enum SignatureStatus {
+  PENDING
+  SENT
+  VIEWED
+  SIGNED
+  DECLINED
+  EXPIRED
+}
+
+// ============================================
+// INVOICES & PAYMENTS
+// ============================================
+
+model Invoice {
+  id            String        @id @default(cuid())
+  
+  // Reference
+  invoiceNumber String        @unique  // SOLAR-INV-2024-0001
+  
+  // Parties
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  caseId        String?
+  case          Case?         @relation(fields: [caseId], references: [id])
+  
+  // Dates
+  issueDate     DateTime      @default(now())
+  dueDate       DateTime
+  
+  // Amounts (CHF)
+  subtotal      Decimal       @db.Decimal(12, 2)
+  vatRate       Decimal       @db.Decimal(4, 2)  @default(8.1)
+  vatAmount     Decimal       @db.Decimal(12, 2)
+  total         Decimal       @db.Decimal(12, 2)
+  
+  // Status
+  status        InvoiceStatus @default(DRAFT)
+  
+  // Payment tracking
+  paidAmount    Decimal       @db.Decimal(12, 2) @default(0)
+  paidAt        DateTime?
+  
+  // Notes
+  notes         String?
+  internalNotes String?
+  
+  // Relations
+  items         InvoiceItem[]
+  payments      Payment[]
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  @@index([tenantId])
+  @@index([caseId])
+  @@index([status])
+  @@index([invoiceNumber])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PAID
+  PARTIALLY_PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  // Item details
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  amount      Decimal  @db.Decimal(10, 2)
+  
+  // Category
+  category    InvoiceCategory
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([invoiceId])
+}
+
+enum InvoiceCategory {
+  NOTARY
+  REGISTRY_FEE
+  ADDRESS
+  DIRECTOR
+  ACCOUNTING
+  CONSULTING
+  OTHER
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  
+  invoiceId   String
+  invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  // Amount
+  amount      Decimal       @db.Decimal(12, 2)
+  currency    String        @default("CHF")
+  
+  // Method
+  method      PaymentMethod
+  reference   String?       // Transaction ID, check number, etc.
+  
+  // Status
+  status      PaymentStatus @default(PENDING)
+  
+  // Dates
+  paidAt      DateTime?
+  
+  // Notes
+  notes       String?
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  @@index([invoiceId])
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CREDIT_CARD
+  TWINT
+  CASH
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ============================================
+// COMMENTS & ACTIVITY
+// ============================================
+
+model Comment {
+  id          String   @id @default(cuid())
+  
+  caseId      String
+  case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+  
+  content     String
+  
+  // Visibility
+  isInternal  Boolean  @default(false)  // Hidden from client
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([caseId])
+}
