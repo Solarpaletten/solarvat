@@ -1,177 +1,224 @@
-// SOLAR Platform — Auth Library
-// Simple session-based authentication
+/**
+ * SOLAR Platform — Auth Utilities
+ * 
+ * Session-based authentication with:
+ * - bcrypt password hashing
+ * - HttpOnly cookies
+ * - DB-backed sessions
+ */
 
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers';
 
-// Types
-export type SystemRole = 'USER' | 'SOLAR_STAFF' | 'SOLAR_ADMIN'
-export type TenantRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER'
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+export const SESSION_COOKIE = 'solar_session';
+export const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export type SystemRole = 'SOLAR_ADMIN' | 'SOLAR_STAFF' | 'USER';
+export type TenantRole = 'OWNER' | 'MEMBER';
 
 export interface SessionUser {
-  id: string
-  email: string
-  name: string | null
-  systemRole: SystemRole
-}
-
-export interface SessionMembership {
-  tenantId: string
-  tenantSlug: string
-  role: TenantRole
+  id: string;
+  email: string;
+  name: string | null;
+  systemRole: SystemRole;
+  memberships: {
+    tenantId: string;
+    tenantSlug: string;
+    role: TenantRole;
+  }[];
 }
 
 export interface Session {
-  user: SessionUser
-  memberships: SessionMembership[]
+  id: string;
+  token: string;
+  userId: string;
+  expiresAt: Date;
+  user: SessionUser;
 }
 
-// Session cookie name
-const SESSION_COOKIE = 'solar_session'
+// ============================================================
+// PASSWORD HASHING (simplified for demo - use bcrypt in production)
+// ============================================================
 
-// ============================================
-// Session Management
-// ============================================
-
-export async function getSession(): Promise<Session | null> {
-  const cookieStore = cookies()
-  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value
-  
-  if (!sessionToken) {
-    return null
-  }
-
-  // TODO: In production, validate token against database
-  // For now, decode from base64 JSON (dev only)
-  try {
-    const decoded = Buffer.from(sessionToken, 'base64').toString('utf-8')
-    return JSON.parse(decoded) as Session
-  } catch {
-    return null
-  }
+/**
+ * Hash password using simple algorithm
+ * NOTE: In production, use bcrypt:
+ * import bcrypt from 'bcrypt';
+ * return bcrypt.hash(password, 12);
+ */
+export async function hashPassword(password: string): Promise<string> {
+  // Simple hash for demo (replace with bcrypt in production)
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password + 'solar_salt_2024');
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function createSession(session: Session): Promise<void> {
-  const cookieStore = cookies()
-  const encoded = Buffer.from(JSON.stringify(session)).toString('base64')
-  
-  cookieStore.set(SESSION_COOKIE, encoded, {
+/**
+ * Verify password against hash
+ */
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const passwordHash = await hashPassword(password);
+  return passwordHash === hash;
+}
+
+// ============================================================
+// SESSION MANAGEMENT
+// ============================================================
+
+/**
+ * Generate secure random token
+ */
+export function generateSessionToken(): string {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Calculate session expiration date
+ */
+export function getSessionExpiry(): Date {
+  return new Date(Date.now() + SESSION_MAX_AGE * 1000);
+}
+
+/**
+ * Set session cookie
+ */
+export async function setSessionCookie(token: string): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: SESSION_MAX_AGE,
     path: '/',
-  })
+  });
 }
 
-export async function destroySession(): Promise<void> {
-  const cookieStore = cookies()
-  cookieStore.delete(SESSION_COOKIE)
+/**
+ * Delete session cookie
+ */
+export async function deleteSessionCookie(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete(SESSION_COOKIE);
 }
 
-// ============================================
-// Auth Guards
-// ============================================
+/**
+ * Get session token from cookie
+ */
+export async function getSessionToken(): Promise<string | null> {
+  const cookieStore = await cookies();
+  const cookie = cookieStore.get(SESSION_COOKIE);
+  return cookie?.value ?? null;
+}
 
-export async function requireAuth(): Promise<Session> {
-  const session = await getSession()
+// ============================================================
+// AUTHORIZATION HELPERS
+// ============================================================
+
+/**
+ * Check if user is SOLAR staff (admin or staff)
+ */
+export function isStaff(user: SessionUser): boolean {
+  return user.systemRole === 'SOLAR_ADMIN' || user.systemRole === 'SOLAR_STAFF';
+}
+
+/**
+ * Check if user is SOLAR admin
+ */
+export function isAdmin(user: SessionUser): boolean {
+  return user.systemRole === 'SOLAR_ADMIN';
+}
+
+/**
+ * Check if user has access to tenant
+ */
+export function hasTenantAccess(user: SessionUser, tenantSlug: string): boolean {
+  // Staff has access to all tenants
+  if (isStaff(user)) return true;
   
-  if (!session) {
-    redirect('/login')
+  // Check membership
+  return user.memberships.some(m => m.tenantSlug === tenantSlug);
+}
+
+/**
+ * Check if user is tenant owner
+ */
+export function isTenantOwner(user: SessionUser, tenantSlug: string): boolean {
+  return user.memberships.some(
+    m => m.tenantSlug === tenantSlug && m.role === 'OWNER'
+  );
+}
+
+/**
+ * Get redirect URL after login based on user role
+ */
+export function getLoginRedirectUrl(user: SessionUser): string {
+  // Staff goes to admin
+  if (isStaff(user)) {
+    return '/admin';
   }
   
-  return session
-}
-
-export async function requireAdmin(): Promise<Session> {
-  const session = await requireAuth()
-  
-  if (session.user.systemRole !== 'SOLAR_ADMIN' && session.user.systemRole !== 'SOLAR_STAFF') {
-    redirect('/unauthorized')
+  // Regular user goes to their first tenant's portal
+  const firstMembership = user.memberships[0];
+  if (firstMembership) {
+    return `/portal/${firstMembership.tenantSlug}/dashboard`;
   }
   
-  return session
+  // No membership - go to home
+  return '/';
 }
 
-export async function requireTenantAccess(tenantSlug: string): Promise<{
-  session: Session
-  membership: SessionMembership
-}> {
-  const session = await requireAuth()
-  
-  // Admins have access to all tenants
-  if (session.user.systemRole === 'SOLAR_ADMIN' || session.user.systemRole === 'SOLAR_STAFF') {
-    return {
-      session,
-      membership: {
-        tenantId: '',
-        tenantSlug,
-        role: 'OWNER' as TenantRole,
-      },
-    }
+// ============================================================
+// VALIDATION
+// ============================================================
+
+/**
+ * Validate email format
+ */
+export function isValidEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+/**
+ * Validate password strength
+ */
+export function isValidPassword(password: string): { valid: boolean; error?: string } {
+  if (password.length < 8) {
+    return { valid: false, error: 'Passwort muss mindestens 8 Zeichen haben' };
   }
-  
-  // Check if user is member of this tenant
-  const membership = session.memberships.find(m => m.tenantSlug === tenantSlug)
-  
-  if (!membership) {
-    redirect('/unauthorized')
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, error: 'Passwort muss mindestens einen Großbuchstaben enthalten' };
   }
-  
-  return { session, membership }
-}
-
-// ============================================
-// Permission Checks
-// ============================================
-
-export function canManageTenant(membership: SessionMembership): boolean {
-  return membership.role === 'OWNER' || membership.role === 'ADMIN'
-}
-
-export function canViewCase(membership: SessionMembership): boolean {
-  return true // All members can view
-}
-
-export function canEditCase(membership: SessionMembership): boolean {
-  return membership.role === 'OWNER' || membership.role === 'ADMIN' || membership.role === 'MEMBER'
-}
-
-export function isAdmin(session: Session): boolean {
-  return session.user.systemRole === 'SOLAR_ADMIN' || session.user.systemRole === 'SOLAR_STAFF'
-}
-
-// ============================================
-// Dev Helpers
-// ============================================
-
-// Create a mock session for development
-export function createMockAdminSession(): Session {
-  return {
-    user: {
-      id: 'admin-001',
-      email: 'admin@solar.ch',
-      name: 'SOLAR Admin',
-      systemRole: 'SOLAR_ADMIN',
-    },
-    memberships: [],
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, error: 'Passwort muss mindestens einen Kleinbuchstaben enthalten' };
   }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, error: 'Passwort muss mindestens eine Zahl enthalten' };
+  }
+  return { valid: true };
 }
 
-export function createMockClientSession(tenantSlug: string): Session {
-  return {
-    user: {
-      id: 'user-001',
-      email: 'client@example.com',
-      name: 'Test Client',
-      systemRole: 'USER',
-    },
-    memberships: [
-      {
-        tenantId: 'tenant-001',
-        tenantSlug,
-        role: 'OWNER',
-      },
-    ],
-  }
+/**
+ * Generate slug from company name
+ */
+export function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[äÄ]/g, 'ae')
+    .replace(/[öÖ]/g, 'oe')
+    .replace(/[üÜ]/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }

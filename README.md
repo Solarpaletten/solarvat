@@ -2,185 +2,208 @@
 
 **Company Infrastructure OS** — Multi-tenant SaaS для регистрации компаний в Швейцарии.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/solar-gmbh/solar-platform)
-[![Next.js](https://img.shields.io/badge/Next.js-14.2-black.svg)](https://nextjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg)](https://www.typescriptlang.org/)
-[![Prisma](https://img.shields.io/badge/Prisma-5.14-2D3748.svg)](https://www.prisma.io/)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Next.js](https://img.shields.io/badge/Next.js-14.2-black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
+![Prisma](https://img.shields.io/badge/Prisma-5.14-green)
 
 ---
 
-## 🎯 Что это
+## 🎯 Описание
 
-SOLAR Platform — это двухуровневая multi-tenant система для управления процессом регистрации GmbH/AG в Швейцарии:
+SOLAR Platform — это полноценная инфраструктурная платформа для:
 
-1. **Admin Panel (SOLAR Ops)** — для команды SOLAR: управление клиентами, кейсами, инвойсами
-2. **Client Portal** — личный кабинет клиента: отслеживание прогресса, документы, платежи
+- **Регистрации GmbH/AG** в Швейцарии
+- **Управления провайдерами** (нотариусы, адреса, директора, бухгалтерия)
+- **Отслеживания кейсов** от старта до завершения
+- **Клиентского портала** для мандантов
 
-## ✨ Основные возможности
+### Ключевые возможности
 
-- 🏢 **Multi-tenancy** — изоляция данных между клиентами
-- 📁 **Case Management** — полный workflow регистрации компании (12 шагов)
-- 📋 **Provider Catalog** — база нотариусов, адресов, директоров, бухгалтеров (43 записи)
-- 💰 **Cost Calculator** — расчёт стоимости по городу и типу компании
-- 🔐 **Role-based Access** — SOLAR_ADMIN, SOLAR_STAFF, TENANT_OWNER, TENANT_MEMBER
-- 🇩🇪 **DE-first** — интерфейс на немецком языке
+| Функция | Описание |
+|---------|----------|
+| Multi-tenant | Изоляция данных между клиентами |
+| Admin Panel | Управление всеми мандантами и кейсами |
+| Client Portal | Личный кабинет для клиентов |
+| Provider Catalog | Каталог из 4 блоков (43 записи) |
+| Cost Calculator | SSR калькулятор стоимости |
+| State Machine | 12-шаговый процесс регистрации |
+
+---
 
 ## 🏗️ Архитектура
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    SOLAR Platform                        │
-├─────────────────┬───────────────────┬───────────────────┤
-│   (public)      │     (admin)       │     (portal)      │
-│                 │                   │                   │
-│   /             │   /admin          │   /portal/[slug]  │
-│   /routes/*     │   /admin/tenants  │   /portal/[slug]/ │
-│   (Catalog)     │   /admin/cases    │     dashboard     │
-│                 │   /admin/invoices │   /portal/[slug]/ │
-│                 │   /admin/catalog  │     cases/[id]    │
-└─────────────────┴───────────────────┴───────────────────┘
+SOLAR Platform v1.0.0
+├── 🌐 Public          — Публичный каталог
+├── 🔧 Admin           — SOLAR Operations (staff)
+│   ├── /admin/tenants
+│   ├── /admin/tenants/[tenantId]
+│   ├── /admin/cases/[caseId]
+│   └── /admin/catalog
+└── 👤 Portal          — Client Portal (mandanten)
+    └── /portal/[tenantSlug]/dashboard
 ```
 
-## 📚 Документация
+### Технологии
 
-| Документ | Описание |
-|----------|----------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Общая архитектура системы |
-| [ROUTING.md](docs/ROUTING.md) | Структура роутов и динамические пути |
-| [PRISMA.md](docs/PRISMA.md) | Модели данных и tenant-логика |
-| [SETUP.md](docs/SETUP.md) | Установка и запуск проекта |
+- **Framework**: Next.js 14 (App Router)
+- **Language**: TypeScript 5.0
+- **Database**: PostgreSQL + Prisma 5.14
+- **Styling**: Tailwind CSS 3.4
+- **i18n**: DE-first (Deutsch)
 
-## 🚀 Быстрый старт
+---
+
+## 📁 Структура проекта
+
+```
+solarvat/
+├── app/
+│   ├── (public)/              # Публичные страницы
+│   ├── (admin)/admin/         # Admin panel
+│   │   ├── page.tsx           # Dashboard
+│   │   ├── tenants/           # Mandanten
+│   │   │   ├── page.tsx
+│   │   │   └── [tenantId]/
+│   │   ├── cases/
+│   │   │   └── [caseId]/
+│   │   └── catalog/
+│   └── (portal)/portal/       # Client portal
+│       └── [tenantSlug]/
+│           ├── dashboard/
+│           ├── cases/[caseId]/
+│           ├── documents/
+│           └── invoices/
+├── lib/
+│   ├── types.ts               # TypeScript types
+│   ├── calculator.ts          # Pricing logic
+│   ├── i18n/de.ts             # German translations
+│   └── data/                  # Static data (43 records)
+├── prisma/
+│   ├── schema.prisma          # 12 models
+│   └── seed.ts                # Demo data
+├── components/
+│   └── Filters.tsx            # Cascading filters
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── ROUTING.md
+    ├── PRISMA.md
+    └── SETUP.md
+```
+
+---
+
+## 🚀 Quick Start
+
+### Требования
+
+- Node.js 18+
+- pnpm 8+ (рекомендуется)
+- PostgreSQL 14+ (опционально для dev)
+
+### Установка
 
 ```bash
-# 1. Клонировать репозиторий
-git clone https://github.com/solar-gmbh/solar-platform.git
-cd solar-platform
+# 1. Clone
+git clone https://github.com/Solarpaletten/solarvat.git
+cd solarvat
 
-# 2. Установить зависимости
+# 2. Install
 pnpm install
 
-# 3. Сгенерировать Prisma Client
+# 3. Environment
+cp .env.example .env
+
+# 4. Database (optional)
 pnpm db:generate
-
-# 4. Настроить переменные окружения
-cp .env.example .env.local
-# Отредактировать DATABASE_URL
-
-# 5. Инициализировать базу данных
 pnpm db:push
+pnpm db:seed
 
-# 6. Запустить dev-сервер
+# 5. Run
 pnpm dev
 ```
 
 Открыть: http://localhost:3000
 
-## 📁 Структура проекта
+### Production Build
 
+```bash
+pnpm build
+pnpm start
 ```
-solar-platform/
-├── app/
-│   ├── (public)/           # Публичные страницы
-│   ├── (admin)/admin/      # Admin Panel
-│   │   ├── page.tsx        # Dashboard
-│   │   ├── tenants/        # Mandanten
-│   │   ├── cases/          # Fälle
-│   │   └── catalog/        # Provider-Katalog
-│   ├── (portal)/portal/    # Client Portal
-│   │   └── [tenantSlug]/   # Dynamic tenant routing
-│   └── routes/             # Catalog pages (legacy)
-├── lib/
-│   ├── auth.ts             # Auth utilities
-│   ├── types.ts            # TypeScript types
-│   ├── calculator.ts       # Cost calculation
-│   └── data/               # Static provider data
-├── prisma/
-│   ├── schema.prisma       # Database schema
-│   └── seed.ts             # Seed script
-├── middleware.ts           # Auth guards
-└── docs/                   # Documentation
-```
-
-## 🛠️ Tech Stack
-
-| Категория | Технология |
-|-----------|------------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript 5.4 |
-| Styling | Tailwind CSS 3.4 |
-| Database | PostgreSQL + Prisma 5.14 |
-| Auth | Session-based (HttpOnly cookies) |
-| Deployment | Vercel / Docker |
-
-## 📊 Модели данных
-
-**Core:**
-- `User` — пользователи системы
-- `Tenant` — клиенты (организации)
-- `Membership` — связь User ↔ Tenant с ролью
-
-**Cases:**
-- `Case` — процесс регистрации компании
-- `CaseStep` — шаги workflow (12 типов)
-- `CaseProvider` — выбранные провайдеры для кейса
-
-**Providers:**
-- `Provider` — нотариусы, адреса, директора, бухгалтеры
-- `ProviderOffer` — цены и возможности провайдера
-
-**Billing:**
-- `Invoice` — счета
-- `Payment` — платежи
-- `Document` — документы с подписями
-
-## 🔄 Case Workflow
-
-```
-LEAD → KYC_PENDING → KYC_APPROVED
-                          ↓
-         PROVIDERS_SELECTING → PROVIDERS_CONFIRMED
-                                       ↓
-              NOTARY_SCHEDULED → DOCUMENTS_SIGNING → FILED
-                                                       ↓
-                      REGISTERED → VAT_APPLYING → VAT_GRANTED → ACTIVE
-```
-
-## 📈 Roadmap
-
-### v1.0.0 ✅ (Current)
-- [x] Multi-tenant architecture
-- [x] Admin Panel (Dashboard, Tenants, Cases)
-- [x] Client Portal (Dashboard, Case view)
-- [x] Provider Catalog (4 блока, 43 записи)
-- [x] Cost Calculator
-- [x] Prisma Schema (12 моделей)
-- [x] Case State Machine
-
-### v1.1.0 🔜 (Next)
-- [ ] Auth (Login / Register)
-- [ ] Real session management
-- [ ] Protected routes (middleware)
-- [ ] User-Tenant binding
-
-### v1.2.0 📋 (Planned)
-- [ ] Case creation wizard
-- [ ] Provider selection UI
-- [ ] Invoice generation
-- [ ] Document upload (S3/R2)
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing`)
-5. Open Pull Request
-
-## 📄 License
-
-Proprietary — SOLAR GmbH Zürich
 
 ---
 
-**Built with ❤️ by SOLAR Team**
+## 📖 Документация
+
+| Документ | Описание |
+|----------|----------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Общая архитектура системы |
+| [ROUTING.md](docs/ROUTING.md) | Структура маршрутов |
+| [PRISMA.md](docs/PRISMA.md) | Схема базы данных |
+| [SETUP.md](docs/SETUP.md) | Инструкции по установке |
+
+---
+
+## 📊 Каталог провайдеров
+
+| Блок | Записей | Описание |
+|------|---------|----------|
+| Notaries | 13 | Нотариусы с QES |
+| Addresses | 8 | Юридические адреса |
+| Directors | 7 | Номинальные директора |
+| Accounting | 10 | Бухгалтерские фирмы |
+| **QES** | 5 | Провайдеры цифровой подписи |
+
+---
+
+## 🔒 Роли и доступ
+
+| Role | Scope | Access |
+|------|-------|--------|
+| `SOLAR_ADMIN` | System | Полный доступ |
+| `SOLAR_STAFF` | System | Admin, все tenants |
+| `TENANT_OWNER` | Tenant | Свой tenant, полный |
+| `TENANT_MEMBER` | Tenant | Свой tenant, ограниченный |
+
+---
+
+## 🛣️ Roadmap
+
+### v1.0.0 (Current) ✅
+- [x] Multi-tenant architecture
+- [x] Admin panel
+- [x] Client portal
+- [x] Provider catalog
+- [x] Case state machine
+- [x] DE-first i18n
+
+### v1.1.0 (Next)
+- [ ] Authentication (Login/Register)
+- [ ] Real sessions
+- [ ] Protected routes
+- [ ] Email notifications
+
+### v1.2.0 (Future)
+- [ ] Payment integration
+- [ ] Document upload
+- [ ] B-permit checklist
+
+---
+
+## 📄 License
+
+Private — SOLAR GmbH Zürich
+
+---
+
+## 👥 Team
+
+- **Leanid** — Architect, Vision
+- **Dashka** — Senior, Product Owner
+- **Claude** — Engineer, Implementation
+
+---
+
+**SOLAR Platform** — От старта → до GmbH/AG → B-permit → бизнес. 🚀

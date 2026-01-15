@@ -2,230 +2,323 @@
 
 ## Overview
 
-SOLAR Platform — двухуровневая multi-tenant SaaS система, построенная на Next.js 14 App Router.
+SOLAR Platform — multi-tenant SaaS для регистрации компаний в Швейцарии. Архитектура построена на принципах:
 
-## System Design
+- **Tenant Isolation** — полная изоляция данных между клиентами
+- **Role-Based Access** — 4 уровня доступа
+- **Server-First** — Server Components по умолчанию
+- **Type Safety** — строгая типизация через TypeScript + Prisma
+
+---
+
+## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         SOLAR Platform                               │
-│                                                                      │
-│  ┌─────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │   PUBLIC    │  │     ADMIN       │  │        PORTAL           │  │
-│  │             │  │   (SOLAR Ops)   │  │   (Client Portal)       │  │
-│  │  • Home     │  │                 │  │                         │  │
-│  │  • Catalog  │  │  • Dashboard    │  │  • Dashboard            │  │
-│  │  • Calc     │  │  • Tenants      │  │  • Cases                │  │
-│  │             │  │  • Cases        │  │  • Documents            │  │
-│  │             │  │  • Invoices     │  │  • Invoices             │  │
-│  │             │  │  • Catalog      │  │                         │  │
-│  └─────────────┘  └─────────────────┘  └─────────────────────────┘  │
-│         │                  │                      │                  │
-│         ▼                  ▼                      ▼                  │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                      MIDDLEWARE                              │    │
-│  │                   (Auth Guards)                              │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                    PRISMA / PostgreSQL                       │    │
-│  │                                                              │    │
-│  │  User │ Tenant │ Membership │ Case │ Provider │ Invoice     │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        SOLAR Platform                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────────────┐   │
+│  │   Public    │   │    Admin    │   │    Client Portal    │   │
+│  │  (Catalog)  │   │   (Staff)   │   │     (Mandanten)     │   │
+│  └─────────────┘   └─────────────┘   └─────────────────────┘   │
+│         │                 │                     │               │
+│         └─────────────────┼─────────────────────┘               │
+│                           │                                     │
+│                    ┌──────▼──────┐                              │
+│                    │  Middleware │                              │
+│                    │   (Auth)    │                              │
+│                    └──────┬──────┘                              │
+│                           │                                     │
+│         ┌─────────────────┼─────────────────────┐               │
+│         │                 │                     │               │
+│  ┌──────▼──────┐  ┌───────▼───────┐  ┌─────────▼─────────┐     │
+│  │   Prisma    │  │   Business    │  │    Calculator     │     │
+│  │   Client    │  │    Logic      │  │      (SSR)        │     │
+│  └──────┬──────┘  └───────────────┘  └───────────────────┘     │
+│         │                                                       │
+│  ┌──────▼──────┐                                                │
+│  │  PostgreSQL │                                                │
+│  └─────────────┘                                                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Route Groups
 
-Next.js App Router организован через Route Groups:
-
-| Group | Path | Purpose | Access |
-|-------|------|---------|--------|
-| `(public)` | `/`, `/routes/*` | Публичный каталог | Все |
-| `(admin)` | `/admin/*` | Админ-панель SOLAR | SOLAR_ADMIN, SOLAR_STAFF |
-| `(portal)` | `/portal/[slug]/*` | Личный кабинет клиента | TENANT_* |
-
-## Multi-Tenancy Model
-
-### Path-based Tenancy
-
-```
-/portal/[tenantSlug]/dashboard
-/portal/[tenantSlug]/cases
-/portal/[tenantSlug]/cases/[caseId]
-/portal/[tenantSlug]/documents
-/portal/[tenantSlug]/invoices
-```
-
-`tenantSlug` — уникальный URL-friendly идентификатор организации.
-
-### Data Isolation
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                        User                              │
-│  id: "user-001"                                          │
-│  email: "client@example.com"                             │
-│  systemRole: USER                                        │
-└─────────────────────────────────────────────────────────┘
-           │
-           │ Membership
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                       Tenant                             │
-│  id: "tenant-001"                                        │
-│  slug: "techstart"                                       │
-│  name: "TechStart GmbH"                                  │
-└─────────────────────────────────────────────────────────┘
-           │
-           │ Cases, Invoices, Documents
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                        Case                              │
-│  id: "case-001"                                          │
-│  tenantId: "tenant-001"  ← Isolation key                 │
-│  caseNumber: "SOLAR-2024-0001"                           │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Role-Based Access Control
-
-### System Roles (User.systemRole)
-
-| Role | Description | Access |
-|------|-------------|--------|
-| `SOLAR_ADMIN` | Администратор SOLAR | Полный доступ ко всему |
-| `SOLAR_STAFF` | Сотрудник SOLAR | Admin panel, все tenants |
-| `USER` | Обычный пользователь | Только свои tenants |
-
-### Tenant Roles (Membership.role)
-
-| Role | Description | Permissions |
-|------|-------------|-------------|
-| `OWNER` | Владелец организации | Полный доступ к tenant |
-| `ADMIN` | Администратор tenant | Управление настройками |
-| `MEMBER` | Участник | Просмотр и редактирование |
-| `VIEWER` | Наблюдатель | Только просмотр |
-
-### Access Matrix
-
-```
-                    │ Public │ Admin │ Portal (own) │ Portal (other)
-────────────────────┼────────┼───────┼──────────────┼────────────────
-SOLAR_ADMIN         │   ✅   │  ✅   │     ✅       │      ✅
-SOLAR_STAFF         │   ✅   │  ✅   │     ✅       │      ✅
-TENANT_OWNER        │   ✅   │  ❌   │     ✅       │      ❌
-TENANT_MEMBER       │   ✅   │  ❌   │     ✅       │      ❌
-Unauthenticated     │   ✅   │  ❌   │     ❌       │      ❌
-```
-
-## State Machine: Case Workflow
-
-```
-                    ┌─────────┐
-                    │  LEAD   │
-                    └────┬────┘
-                         │
-                    ┌────▼────┐
-                    │KYC_PEND │
-                    └────┬────┘
-                         │
-                    ┌────▼────┐
-                    │KYC_APPR │
-                    └────┬────┘
-                         │
-              ┌──────────▼──────────┐
-              │ PROVIDERS_SELECTING │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │ PROVIDERS_CONFIRMED │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │  NOTARY_SCHEDULED   │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │  DOCUMENTS_SIGNING  │
-              └──────────┬──────────┘
-                         │
-                    ┌────▼────┐
-                    │  FILED  │
-                    └────┬────┘
-                         │
-              ┌──────────▼──────────┐
-              │     REGISTERED      │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │    VAT_APPLYING     │
-              └──────────┬──────────┘
-                         │
-              ┌──────────▼──────────┐
-              │     VAT_GRANTED     │
-              └──────────┬──────────┘
-                         │
-                    ┌────▼────┐
-                    │ ACTIVE  │
-                    └─────────┘
-```
-
-## Component Architecture
-
-### Layouts
+Next.js App Router позволяет группировать роуты без влияния на URL:
 
 ```
 app/
-├── layout.tsx                    # Root layout (public)
-├── (admin)/layout.tsx            # Admin layout (sidebar)
-└── (portal)/portal/[slug]/
-    └── layout.tsx                # Portal layout (client nav)
+├── (public)/           # Публичная часть (без auth)
+│   ├── page.tsx        # Home
+│   ├── catalog/        # Provider catalog
+│   └── calculator/     # Cost calculator
+│
+├── (admin)/admin/      # Admin panel (SOLAR staff only)
+│   ├── layout.tsx      # Admin layout
+│   ├── page.tsx        # Dashboard
+│   ├── tenants/        # Tenant management
+│   ├── cases/          # Case management
+│   └── catalog/        # Provider catalog (edit)
+│
+└── (portal)/portal/    # Client portal (mandanten)
+    └── [tenantSlug]/   # Dynamic tenant routing
+        ├── layout.tsx  # Portal layout
+        ├── dashboard/
+        ├── cases/
+        ├── documents/
+        └── invoices/
 ```
 
-### Server vs Client Components
+### Почему Route Groups?
 
-| Component | Type | Reason |
-|-----------|------|--------|
-| Pages (`page.tsx`) | Server | Data fetching, SEO |
-| Layouts | Server | Shared structure |
-| Filters | Client | URL state, interactivity |
-| Forms | Client | User input |
+1. **Разделение layouts** — Admin и Portal имеют разные layouts
+2. **Middleware isolation** — разные правила auth для каждой группы
+3. **Code splitting** — оптимизация загрузки
+
+---
+
+## Multi-Tenant Model
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                      SOLAR (System)                       │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
+│  │ SOLAR_ADMIN │  │ SOLAR_STAFF │  │  Providers  │       │
+│  └─────────────┘  └─────────────┘  └─────────────┘       │
+└──────────────────────────────────────────────────────────┘
+              │
+              │ manages
+              ▼
+┌──────────────────────────────────────────────────────────┐
+│                    Tenant (Mandant)                       │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
+│  │    Owner    │  │   Members   │  │    Cases    │       │
+│  └─────────────┘  └─────────────┘  └─────────────┘       │
+│                                           │              │
+│                                           ▼              │
+│                          ┌────────────────────────────┐  │
+│                          │  Steps / Docs / Invoices   │  │
+│                          └────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Tenant Isolation
+
+- Каждый Tenant имеет уникальный `slug` для URL
+- Membership связывает User с Tenant
+- Case привязан к Tenant через `tenantId`
+- Documents/Invoices привязаны к Case
+
+---
+
+## Case State Machine
+
+12-шаговый процесс регистрации компании:
+
+```
+LEAD
+  │
+  ▼
+KYC_PENDING ───► KYC_APPROVED
+  │
+  ▼
+PROVIDERS_SELECTING ───► PROVIDERS_CONFIRMED
+  │
+  ▼
+NOTARY_SCHEDULED
+  │
+  ▼
+DOCUMENTS_SIGNING
+  │
+  ▼
+FILED
+  │
+  ▼
+REGISTERED
+  │
+  ▼
+VAT_APPLYING ───► VAT_GRANTED
+  │
+  ▼
+ACCOUNTING_SETUP
+  │
+  ▼
+ACTIVE ✓
+```
+
+### Step Status
+
+Каждый шаг может иметь статус:
+
+| Status | Значение |
+|--------|----------|
+| `TODO` | Не начат |
+| `IN_PROGRESS` | В работе |
+| `DONE` | Завершён |
+| `BLOCKED` | Заблокирован |
+
+---
+
+## Provider Catalog
+
+4 блока провайдеров с единой структурой:
+
+```
+Provider (base)
+├── id, name, type
+├── contactEmail, contactPhone
+├── website
+├── isPrimary, isActive
+│
+└── ProviderOffer (capabilities)
+    ├── cantons[], cities[]
+    ├── companyTypes[]
+    ├── capabilities[]
+    ├── pricing
+    └── languages[]
+```
+
+### Provider Types
+
+| Type | Описание |
+|------|----------|
+| `NOTARY` | Нотариус с QES |
+| `ADDRESS` | Юридический адрес |
+| `DIRECTOR` | Номинальный директор |
+| `ACCOUNTING` | Бухгалтерия |
+| `QES` | Квалифицированная электронная подпись |
+
+---
+
+## Security Model
+
+### Authentication Flow
+
+```
+Request
+  │
+  ▼
+Middleware ───► Check Session Cookie
+  │
+  │ no session
+  ▼
+Redirect to /login
+  │
+  │ valid session
+  ▼
+Check Role/Permissions
+  │
+  ▼
+Route Handler
+```
+
+### Authorization Levels
+
+```
+SOLAR_ADMIN
+  │ all access
+  ▼
+SOLAR_STAFF
+  │ admin panel, all tenants
+  ▼
+TENANT_OWNER
+  │ own tenant, full control
+  ▼
+TENANT_MEMBER
+  │ own tenant, limited
+```
+
+---
 
 ## Data Flow
 
+### Cascading Filters (UX)
+
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Browser   │────▶│  Next.js    │────▶│   Prisma    │
-│             │     │  App Router │     │             │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │
-       │                   │                   │
-       ▼                   ▼                   ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │     │   Server    │     │ PostgreSQL  │
-│ Components  │     │ Components  │     │             │
-└─────────────┘     └─────────────┘     └─────────────┘
+Country ───► Canton ───► City ───► Provider Type
+   │            │          │             │
+   ▼            ▼          ▼             ▼
+  [CH]       [ZG,ZH]    [Zug,Zürich]  [GMBH,AG]
 ```
 
-## Security Considerations
+URL State: `?canton=ZG&city=ZUG&type=GMBH`
 
-1. **Authentication**: Session-based с HttpOnly cookies
-2. **Authorization**: Middleware guards на route level
-3. **Data isolation**: Tenant ID в каждом запросе
-4. **Input validation**: Zod schemas (planned)
-5. **CSRF protection**: SameSite cookies
+### Calculator (SSR)
+
+```
+Input (URL params)
+  │
+  ▼
+Server Component
+  │
+  ▼
+Calculate from lib/calculator.ts
+  │
+  ▼
+Render HTML (instant)
+```
+
+---
 
 ## Scalability
 
-### Current (v1.0)
-- Single PostgreSQL instance
-- Vercel serverless deployment
-- Static data for providers
+### Geo-Scale Model
 
-### Future (v2.0+)
-- Connection pooling (Prisma Accelerate)
-- Redis for sessions
-- S3/R2 for documents
-- Multi-region deployment
+```typescript
+interface Country {
+  code: string;        // CH, DE, AT
+  name: string;
+  cantons: Canton[];
+}
+
+interface Canton {
+  code: string;        // ZG, ZH
+  name: string;
+  cities: City[];
+}
+
+interface City {
+  id: string;          // ZUG, ZURICH
+  name: string;
+}
+```
+
+### Database Scaling
+
+- **Read replicas** для Portal
+- **Connection pooling** через Prisma
+- **Indexes** на tenant_id, case_id
+
+---
+
+## File Structure Conventions
+
+| Папка | Назначение |
+|-------|------------|
+| `app/` | Next.js App Router pages |
+| `components/` | Shared React components |
+| `lib/` | Business logic, utilities |
+| `prisma/` | Database schema, migrations |
+| `public/` | Static assets |
+| `docs/` | Documentation |
+
+---
+
+## Key Decisions
+
+| Решение | Причина |
+|---------|---------|
+| App Router | Server Components, streaming |
+| Prisma | Type-safe DB, migrations |
+| Route Groups | Layout isolation |
+| DE-first | Target market (CH-DE) |
+| SSR Calculator | Speed, SEO |
+| URL State | Shareable links |
+
+---
+
+*Документ: ARCHITECTURE.md v1.0.0*
